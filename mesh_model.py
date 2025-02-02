@@ -1,7 +1,7 @@
 #region IMPORTS
 import os
-import logging
 import math
+from inspect import currentframe, getframeinfo
 import vtk
 from vtkmodules.vtkIOGeometry import vtkSTLReader, vtkSTLWriter, vtkBYUReader, vtkOBJReader
 from vtkmodules.vtkIOPLY import vtkPLYReader, vtkPLYWriter
@@ -15,7 +15,19 @@ from vtkmodules.vtkIOXML import vtkXMLPolyDataReader, vtkXMLPolyDataWriter
 #endregion IMPORTS
 
 class MeshModel:
+	"""
+    A class representing a VTK mesh.
+
+    Attributes:
+        vtkSource (vtkAlgorithm): The VTK data source.
+    """
 	def __init__(self, vtkSource=None):
+		"""
+        Initializes a MeshModel object.
+
+        Parameters:
+            vtkSource (vtkAlgorithm): The VTK data source.
+        """
 		if vtkSource == None:
 			self.vtkSource = vtk.vtkEmptyRepresentation()
 		else:
@@ -23,59 +35,85 @@ class MeshModel:
 		self.scaleReversion = 1
 
 	def setSphereSource(self, radius):
-		sphereSource = vtk.vtkSphereSource()
-		sphereSource.SetRadius(radius)
-		sphereSource.SetPhiResolution(50)
-		sphereSource.SetThetaResolution(50)
-		self.vtkSource = sphereSource
-		self.scaleReversion = 1
+		"""
+		Set's the model's source to a sphere of given radius.
+
+		Args:
+			radius (double): Radius of the sphere.
+
+		Returns:
+			None
+		"""
+		if radius > 0:
+			sphereSource = vtk.vtkSphereSource()
+			sphereSource.SetRadius(radius)
+			sphereSource.SetPhiResolution(100)
+			sphereSource.SetThetaResolution(100)
+			self.vtkSource = sphereSource
+			self.vtkSource.Update()
+			self.scaleReversion = 1
 
 	def setConeSource(self, radius, height):
-		coneSource = vtk.vtkConeSource()
-		coneSource.SetRadius(radius)
-		coneSource.SetHeight(height)
-		coneSource.SetResolution(100)
-		self.vtkSource = coneSource
-		self.scaleReversion = 1
+		"""
+		Set's the model's source to a cone of given radius and height.
 
-	def loadMesh(self, filepath):
+		Args:
+			radius (double): Radius of the sphere.
+			height (double): Height of the sphere.
+
+		Returns:
+			None
+		"""
+		if radius > 0 and height > 0:
+			coneSource = vtk.vtkConeSource()
+			coneSource.SetRadius(radius)
+			coneSource.SetHeight(height)
+			coneSource.SetResolution(500)
+			self.vtkSource = coneSource
+			self.vtkSource.Update()
+			self.scaleReversion = 1
+
+	def loadMesh(self, filepath) -> bool:
+		"""
+		Sets the model's source to a sphere of given radius.
+
+		Args:
+			filepath (str): Filepath of the mesh to load. Use an absolute path.
+
+		Returns:
+			bool: Whether the load completed sucessfully.
+		"""
 		_, extension = os.path.splitext(filepath)
 		extension = extension.lower()
 		if extension == ".ply":
 			reader = vtkPLYReader()
-			reader.SetFileName(filepath)
-			reader.Update()
-			self.vtkSource = reader
 		elif extension == ".vtp":
 			reader = vtkXMLPolyDataReader()
-			reader.SetFileName(filepath)
-			reader.Update()
-			self.vtkSource= reader
 		elif extension == ".obj":
 			reader = vtkOBJReader()
-			reader.SetFileName(filepath)
-			reader.Update()
-			self.vtkSource = reader
 		elif extension == ".stl":
 			reader = vtkSTLReader()
-			reader.SetFileName(filepath)
-			reader.Update()
-			self.vtkSource = reader
 		elif extension == ".vtk":
 			reader = vtkPolyDataReader()
-			reader.SetFileName(filepath)
-			reader.Update()
-			self.vtkSource = reader
-		elif extension == ".g":
-			reader = vtkBYUReader()
-			reader.SetGeometryFileName(filepath)
-			reader.Update()
-			self.vtkSource = reader
 		else:
-			logging.error("[{}{}]: Unsupported file extension [{}]".format(extension), exc_info=1)
-			self.vtkSource = None
+			frameinfo = getframeinfo(currentframe())
+			print("[ERROR][{}][{}]: Unsupported file type {}. Valid file types are .ply .vtp .obj .stl .vtk".format(frameinfo.filename, frameinfo.lineno, extension))
+			self.vtkSource = vtk.vtkEmptyRepresentation()
+			return False
 
+		if not os.path.isfile(filepath):
+			self.vtkSource = vtk.vtkEmptyRepresentation()
+			self.vtkSource.Update()
+			frameinfo = getframeinfo(currentframe())
+			print("[ERROR][{}][{}]: Could not load {}. No such file.".format(frameinfo.filename, frameinfo.lineno, filepath))
+			return False
+
+		reader.SetFileName(filepath)
+		reader.Update()
+		self.vtkSource = reader
 		self.scaleReversion = 1
+		self.vtkSource.Update()
+		return True
 
 	def saveMesh(self, filepath):
 		if type(self.vtkSource) == vtk.vtkEmptyRepresentation:
@@ -115,13 +153,26 @@ class MeshModel:
 		transformFilter.SetTransform(scaleTransform)
 		transformFilter.Update()
 		self.vtkSource = transformFilter
+		self.vtkSource.Update()
 
 		self.scaleReversion = self.scaleReversion / scalar
 
 	def resetScale(self):
 		self.scaleMesh(self.scaleReversion)
 
+	def getVolume(self) -> float:
+		if type(self.vtkSource) == vtk.vtkEmptyRepresentation:
+			return 0.0
+		mass = vtk.vtkMassProperties()
+		mass.SetInputData(self.vtkSource.GetOutput())
+		mass.Update()
+		return mass.GetVolume()
+
 	def compareMeshes(sourceMesh, targetMesh, threshold):
+		if type(sourceMesh.vtkSource) == vtk.vtkEmptyRepresentation or type(targetMesh.vtkSource) == vtk.vtkEmptyRepresentation:
+			frameinfo = getframeinfo(currentframe())
+			print("[ERROR][{}][{}]: Source and target meshes must have non empty representations".format(frameinfo.filename, frameinfo.lineno))
+			return False, None, None, None, None, None
 		source_polydata = sourceMesh.vtkSource.GetOutput()
 		# Save the source polydata in case the alignment process does not improve
 		# segmentation.

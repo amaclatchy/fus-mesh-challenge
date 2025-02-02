@@ -5,7 +5,7 @@ from PyQt5.QtGui import *
 from PyQt5.QtCore import *
 from PyQt5.QtWidgets import *
 
-from meshModel import MeshModel
+from mesh_model import MeshModel
 
 import vtk
 

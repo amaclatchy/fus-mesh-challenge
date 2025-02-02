@@ -1,2 +1,3 @@
 vtk
 PyQt5
+pytest
