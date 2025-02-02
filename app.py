@@ -65,7 +65,7 @@ from vtkmodules.vtkRenderingCore import (
 class App(QMainWindow):
 	def __init__(self):
 		super().__init__()
-		self.title = "Amelia's Mesh Manipulation Challenge - Part 1"
+		self.title = "Amelia's Mesh Manipulation Challenge"
 		self.left = 0
 		self.top = 0
 		self.width = 1000
@@ -89,62 +89,138 @@ class TabContainer(QWidget):
 
 		# Initialize tab objects
 		self.tabs = QTabWidget()
-		self.partATab = QWidget()
-		self.partBTab = QWidget()
+		self.partABTab = QWidget()
 		self.partCTab = QWidget()
 		self.partDTab = QWidget()
 
 		# Add individual tabs to tab widget
-		self.tabs.addTab(self.partATab,"Part A")
-		self.tabs.addTab(self.partBTab,"Part B")
+		self.tabs.addTab(self.partABTab,"Part A+B")
 		self.tabs.addTab(self.partCTab,"Part C")
 		self.tabs.addTab(self.partDTab,"Part D")
 
-		# Fill in first tab - mesh object creation
-		self.partATab.layout = QHBoxLayout(self)
-		self.vtkFrameA = VtkFrame(self)
-		self.editFrameA = QFrame(self)
-		self.editFrameA.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+		#region FIRST TAB - MESH CREATION AND SCALING
+		self.partABTab.layout = QHBoxLayout(self)
+		self.vtkFrameAB = VtkFrame(self)
+		self.editFrameAB = QFrame(self)
+		self.editFrameAB.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
 
-		self.editVboxA = QVBoxLayout()
-		self.editVboxA.setAlignment(Qt.AlignmentFlag.AlignCenter)
+		self.editVboxAB = QVBoxLayout()
+		self.editVboxAB.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-		sphereHbox = QHBoxLayout()
-		self.sphRadiusInput = QLineEdit(placeholderText="Radius", maximumWidth=60)
+		self.volumeLabelAB = QLabel("Volume: ")
+		self.areaLabelAB = QLabel("Area: ")
+
+		self.loadSaveGboxAB = self.loadSaveGbox(self.vtkFrameAB)
+
+		self.creationGbox = QGroupBox("Mesh Creation")
+		self.creationGboxLayout = QVBoxLayout()
+
+		self.sphereHbox = QHBoxLayout()
+		self.sphRadiusInput = QLineEdit(placeholderText="radius", maximumWidth=60)
 		self.sphRadiusInput.setValidator(QDoubleValidator())
-		self.createSphereButton = QPushButton("Create Sphere!", self)
-		self.createSphereButton.clicked.connect(lambda:self.createSphere(self.vtkFrameA, self.sphRadiusInput))
-		sphereHbox.addWidget(self.sphRadiusInput)
-		sphereHbox.addWidget(self.createSphereButton)
+		self.createSphereButton = QPushButton("Create Sphere", self)
+		self.createSphereButton.clicked.connect(lambda:self.createSphere(self.vtkFrameAB, self.sphRadiusInput))
+		self.createSphereButton.clicked.connect(lambda:self.updateVolume(self.vtkFrameAB, self.volumeLabelAB))
+		self.createSphereButton.clicked.connect(lambda:self.updateArea(self.vtkFrameAB, self.areaLabelAB))
+		self.sphereHbox.addWidget(self.sphRadiusInput)
+		self.sphereHbox.addWidget(self.createSphereButton)
 
-		coneHbox = QHBoxLayout()
-		self.coneRadiusInput = QLineEdit(placeholderText="Radius", maximumWidth=60)
-		self.coneHeightInput = QLineEdit(placeholderText="Height", maximumWidth=60)
-		self.createConeButton = QPushButton("Create Cone!", self)
-		self.createConeButton.clicked.connect(lambda:self.createCone(self.vtkFrameA, self.coneRadiusInput, self.coneHeightInput))
-		coneHbox.addWidget(self.coneRadiusInput)
-		coneHbox.addWidget(self.coneHeightInput)
-		coneHbox.addWidget(self.createConeButton)
+		self.coneHbox = QHBoxLayout()
+		self.coneRadiusInput = QLineEdit(placeholderText="radius", maximumWidth=60)
+		self.coneHeightInput = QLineEdit(placeholderText="height", maximumWidth=60)
+		self.createConeButton = QPushButton("Create Cone", self)
+		self.createConeButton.clicked.connect(lambda:self.createCone(self.vtkFrameAB, self.coneRadiusInput, self.coneHeightInput))
+		self.createConeButton.clicked.connect(lambda:self.updateVolume(self.vtkFrameAB, self.volumeLabelAB))
+		self.createConeButton.clicked.connect(lambda:self.updateArea(self.vtkFrameAB, self.areaLabelAB))
+		self.coneHbox.addWidget(self.coneRadiusInput)
+		self.coneHbox.addWidget(self.coneHeightInput)
+		self.coneHbox.addWidget(self.createConeButton)
 
-		self.editVboxA.addLayout(sphereHbox)
-		self.editVboxA.addLayout(coneHbox)
+		self.creationGboxLayout.addLayout(self.sphereHbox)
+		self.creationGboxLayout.addLayout(self.coneHbox)
+		self.creationGbox.setLayout(self.creationGboxLayout)
 
-		self.editFrameA.setLayout(self.editVboxA)
+		self.scalingGbox = QGroupBox("Scale Mesh")
+		self.scalingGboxLayout = QVBoxLayout()
 
-		self.partATab.layout.addWidget(self.vtkFrameA)					
-		self.partATab.layout.addWidget(self.editFrameA)					
-		self.partATab.setLayout(self.partATab.layout)					
+		self.scalingHbox = QHBoxLayout()
+		self.scaleInput = QLineEdit(placeholderText="scale")
+		self.scaleInput.setValidator(QDoubleValidator())
+		self.scalingHbox.addWidget(self.scaleInput)
+		self.scaleButton = QPushButton("Scale", self)
+		self.scaleButton.clicked.connect(lambda:self.scaleMesh(self.vtkFrameAB, self.scaleInput))
+		self.scaleButton.clicked.connect(lambda:self.updateVolume(self.vtkFrameAB, self.volumeLabelAB))
+		self.scaleButton.clicked.connect(lambda:self.updateArea(self.vtkFrameAB, self.areaLabelAB))
+		self.scalingHbox.addWidget(self.scaleButton)
+		self.scalingGboxLayout.addLayout(self.scalingHbox)
 
-		# Fill in second tab - mesh scaling
+		self.resetScaleButton = QPushButton("Reset Scale", self)
+		self.resetScaleButton.clicked.connect(lambda:self.resetMeshScale(self.vtkFrameAB))
+		self.resetScaleButton.clicked.connect(lambda:self.updateVolume(self.vtkFrameAB, self.volumeLabelAB))
+		self.resetScaleButton.clicked.connect(lambda:self.updateArea(self.vtkFrameAB, self.areaLabelAB))
+		self.scalingGboxLayout.addWidget(self.resetScaleButton)
 
-		# Fill in third tab - mesh comparison
+		self.scalingGbox.setLayout(self.scalingGboxLayout)
 
-		# Fill in fourth tab - unit tests
+		self.infoGbox = QGroupBox("Mesh Metrics")
+		self.infoGboxLayout = QVBoxLayout()
+		self.infoGboxLayout.addWidget(self.volumeLabelAB)
+		self.infoGboxLayout.addWidget(self.areaLabelAB)
+		self.infoGbox.setLayout(self.infoGboxLayout)
+
+		self.viewGbox = QGroupBox("View")
+		self.viewGboxLayout = QVBoxLayout()
+		self.resetCameraButton = QPushButton("Reset Camera", self)
+		self.resetCameraButton.clicked.connect(lambda:self.resetCamera(self.vtkFrameAB))
+		self.viewGboxLayout.addWidget(self.resetCameraButton)
+		self.viewGbox.setLayout(self.viewGboxLayout)
+
+		self.editVboxAB.addWidget(self.loadSaveGboxAB)
+		self.editVboxAB.addWidget(self.creationGbox)
+		self.editVboxAB.addWidget(self.scalingGbox)
+		self.editVboxAB.addWidget(self.infoGbox)
+		self.editVboxAB.addWidget(self.viewGbox)
+
+		self.editFrameAB.setLayout(self.editVboxAB)
+
+		self.partABTab.layout.addWidget(self.vtkFrameAB)					
+		self.partABTab.layout.addWidget(self.editFrameAB)					
+		self.partABTab.setLayout(self.partABTab.layout)	
+		#endregion FIRST TAB - MESH CREATION AND SCALING			
+
+		#region SECOND TAB - MESH COMPARISON
+		#endregion
+
+		#region THIRD TAB - UNIT TESTS
+		#endregion
 
 		# Add tab widget to the TabContainer layout
 		self.layout.addWidget(self.tabs)
 		self.setLayout(self.layout)
+	
+	def loadSaveGbox(self, vtkFrame) -> QGroupBox:
+		groupbox = QGroupBox("Import/Export Mesh")
+		groupbox_layout = QVBoxLayout()
 
+		loadHbox = QHBoxLayout()
+		loadInput = QLineEdit(placeholderText="absolute path", maximumWidth=400)
+		loadButton = QPushButton("Load Mesh", self)
+		loadButton.clicked.connect(lambda:self.loadMesh(vtkFrame, loadInput))
+		loadHbox.addWidget(loadInput)
+		loadHbox.addWidget(loadButton)
+
+		saveHbox = QHBoxLayout()
+		saveInput = QLineEdit(placeholderText="absolute path", maximumWidth=400)
+		saveButton = QPushButton("Save Mesh", self)
+		saveButton.clicked.connect(lambda:self.saveMesh(vtkFrame, saveInput))
+		saveHbox.addWidget(saveInput)
+		saveHbox.addWidget(saveButton)
+
+		groupbox_layout.addLayout(loadHbox)
+		groupbox_layout.addLayout(saveHbox)
+
+		groupbox.setLayout(groupbox_layout)
+		return groupbox
 
 	def createSphere(self, vtkFrame, radiusInput):
 		if radiusInput.text() == "":
@@ -161,16 +237,60 @@ class TabContainer(QWidget):
 		radiusInput.clear()
 		heightInput.clear()
 
+	def loadMesh(self, vtkFrame, loadInput):
+		if loadInput.text() == "":
+			return
+		vtkFrame.meshModel.loadMesh(loadInput.text())
+		vtkFrame.updateVtkSource()
+		loadInput.clear()
+	
+	def saveMesh(self, vtkFrame, saveInput):
+		if saveInput.text() == "":
+			return
+		success = vtkFrame.meshModel.saveMesh(saveInput.text())
+		if not success:
+			msg = QMessageBox()
+			msg.setIcon(QMessageBox.Critical)
+			msg.setText("Error")
+			msg.setInformativeText("Unable to save mesh to {}".format(saveInput.text()))
+			msg.setWindowTitle("Error")
+			msg.exec_()
+		vtkFrame.updateVtkSource()
+		saveInput.clear()
+	
+	def scaleMesh(self, vtkFrame, scaleInput):
+		if scaleInput.text() == "":
+			return
+		vtkFrame.meshModel.scaleMesh(float(scaleInput.text()))	# safe to cast as we already have double validator and empty check
+		vtkFrame.updateVtkSource()
+		scaleInput.clear()
+
+	def resetMeshScale(self, vtkFrame):
+		vtkFrame.meshModel.resetScale()
+		vtkFrame.updateVtkSource()
+
+	def updateVolume(self, vtkFrame, label):
+		label.setText("Volume: {}".format(vtkFrame.meshModel.mass.GetVolume()))
+
+	def updateArea(self, vtkFrame, label):
+		label.setText("Area: {}".format(vtkFrame.meshModel.mass.GetSurfaceArea()))
+
+	def resetCamera(self, vtkFrame):
+		vtkFrame.resetCamera()
+
 class VtkFrame(QFrame):
 	def __init__(self, parent):
 		super(QWidget, self).__init__(parent)
 
 		self.meshModel = MeshModel()
 
+		self.colors = vtkNamedColors()
+
 		# General layout setup
 		self.vboxlayout = QVBoxLayout()
 		self.vtkWidget = QVTKRenderWindowInteractor(self)
 		self.vboxlayout.addWidget(self.vtkWidget)
+		self.setLayout(self.vboxlayout)
 
 		# vtk renderer setup
 		self.renderer = vtk.vtkRenderer()
@@ -181,15 +301,18 @@ class VtkFrame(QFrame):
 		self.mapper = vtk.vtkPolyDataMapper()
 		self.mapper.SetInputConnection(self.meshModel.vtkSource.GetOutputPort())
 
-		# Set up an actor
+		# Set up the source actor
 		self.actor = vtk.vtkActor()
 		self.actor.SetMapper(self.mapper)
 
-		# Connect actor to renderer
-		self.renderer.AddActor(self.actor)
-		self.renderer.ResetCamera()
+		# Set up the orientation marker actor
+		self.cam_orient_manipulator = vtkCameraOrientationWidget()
+		self.cam_orient_manipulator.SetParentRenderer(self.renderer)
+		self.cam_orient_manipulator.On()
 
-		self.setLayout(self.vboxlayout)
+		# Connect actors to renderer
+		self.renderer.AddActor(self.actor)
+		self.renderer.SetBackground(self.colors.GetColor3d("sea_green_light"))
 
 		self.show()
 		self.interactor.Initialize()
@@ -197,11 +320,14 @@ class VtkFrame(QFrame):
 
 	def updateVtkSource(self):
 		self.mapper.SetInputConnection(self.meshModel.vtkSource.GetOutputPort())
+		self.vtkWidget.GetRenderWindow().Render()	
+	
+	def resetCamera(self):
 		self.renderer.ResetCamera()
-		self.vtkWidget.GetRenderWindow().Render()
-		
+		self.vtkWidget.GetRenderWindow().Render()	
 
 if __name__ == '__main__':
+	print(VTK_VERSION_NUMBER)
 	app = QApplication(sys.argv)
 	ex = App()
 	sys.exit(app.exec_())
