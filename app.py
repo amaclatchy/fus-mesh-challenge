@@ -1,5 +1,6 @@
 #region IMPORTS
 import sys
+import os
 from PyQt5.QtGui import *
 from PyQt5.QtCore import *
 from PyQt5.QtWidgets import *
@@ -10,56 +11,8 @@ import vtk
 
 from vtkmodules.vtkCommonColor import vtkNamedColors
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor # type: ignore
-
-# noinspection PyUnresolvedReferences
-import vtkmodules.vtkInteractionStyle
-# noinspection PyUnresolvedReferences
-import vtkmodules.vtkRenderingOpenGL2
 from vtkmodules.vtkCommonColor import vtkNamedColors
-from vtkmodules.vtkCommonCore import (
-    VTK_DOUBLE_MAX,
-    vtkPoints
-)
-from vtkmodules.vtkCommonCore import (
-    VTK_VERSION_NUMBER,
-    vtkVersion
-)
-from vtkmodules.vtkCommonDataModel import (
-    vtkIterativeClosestPointTransform,
-    vtkPolyData
-)
-from vtkmodules.vtkCommonTransforms import (
-    vtkLandmarkTransform,
-    vtkTransform
-)
-from vtkmodules.vtkFiltersGeneral import (
-    vtkOBBTree,
-    vtkTransformPolyDataFilter
-)
-from vtkmodules.vtkFiltersModeling import vtkHausdorffDistancePointSetFilter
-from vtkmodules.vtkIOGeometry import (
-    vtkBYUReader,
-    vtkOBJReader,
-    vtkSTLReader
-)
-from vtkmodules.vtkIOLegacy import (
-    vtkPolyDataReader,
-    vtkPolyDataWriter
-    )
-from vtkmodules.vtkIOPLY import vtkPLYReader
-from vtkmodules.vtkIOXML import vtkXMLPolyDataReader
-from vtkmodules.vtkInteractionWidgets import (
-    vtkCameraOrientationWidget,
-    vtkOrientationMarkerWidget
-)
-from vtkmodules.vtkRenderingAnnotation import vtkAxesActor
-from vtkmodules.vtkRenderingCore import (
-    vtkActor,
-    vtkDataSetMapper,
-    vtkRenderWindow,
-    vtkRenderWindowInteractor,
-    vtkRenderer
-)
+from vtkmodules.vtkInteractionWidgets import vtkCameraOrientationWidget
 #endregion IMPORTS
 
 class App(QMainWindow):
@@ -87,16 +40,16 @@ class TabContainer(QWidget):
 		super(QWidget, self).__init__(parent)
 		self.layout = QVBoxLayout(self)
 
+		self.resourceList = os.listdir(os.path.join(os.getcwd(), 'resources'))
+
 		# Initialize tab objects
 		self.tabs = QTabWidget()
 		self.partABTab = QWidget()
 		self.partCTab = QWidget()
-		self.partDTab = QWidget()
 
 		# Add individual tabs to tab widget
 		self.tabs.addTab(self.partABTab,"Part A+B")
 		self.tabs.addTab(self.partCTab,"Part C")
-		self.tabs.addTab(self.partDTab,"Part D")
 
 		#region FIRST TAB - MESH CREATION AND SCALING
 		self.partABTab.layout = QHBoxLayout(self)
@@ -110,7 +63,27 @@ class TabContainer(QWidget):
 		self.volumeLabelAB = QLabel("Volume: ")
 		self.areaLabelAB = QLabel("Area: ")
 
-		self.loadSaveGboxAB = self.loadSaveGbox(self.vtkFrameAB)
+		self.loadSaveGboxAB = QGroupBox("Import/Export Mesh")
+		self.loadSaveVboxlayoutAB = QVBoxLayout()
+
+		self.loadHboxAB = QHBoxLayout()
+		self.loadInputAB = QComboBox()
+		self.loadInputAB.addItems(self.resourceList)
+		self.loadButtonAB = QPushButton("Load Mesh", self)
+		self.loadButtonAB.clicked.connect(lambda:self.loadMesh(self.vtkFrameAB, self.loadInputAB))
+		self.loadHboxAB.addWidget(self.loadInputAB)
+		self.loadHboxAB.addWidget(self.loadButtonAB)
+
+		self.saveHboxAB = QHBoxLayout()
+		self.saveInputAB = QLineEdit(placeholderText="absolute path")
+		self.saveButtonAB = QPushButton("Save Mesh", self)
+		self.saveButtonAB.clicked.connect(lambda:self.saveMesh(self.vtkFrameAB, self.saveInputAB))
+		self.saveHboxAB.addWidget(self.saveInputAB)
+		self.saveHboxAB.addWidget(self.saveButtonAB)
+
+		self.loadSaveVboxlayoutAB.addLayout(self.loadHboxAB)
+		self.loadSaveVboxlayoutAB.addLayout(self.saveHboxAB)
+		self.loadSaveGboxAB.setLayout(self.loadSaveVboxlayoutAB)
 
 		self.creationGbox = QGroupBox("Mesh Creation")
 		self.creationGboxLayout = QVBoxLayout()
@@ -120,8 +93,6 @@ class TabContainer(QWidget):
 		self.sphRadiusInput.setValidator(QDoubleValidator())
 		self.createSphereButton = QPushButton("Create Sphere", self)
 		self.createSphereButton.clicked.connect(lambda:self.createSphere(self.vtkFrameAB, self.sphRadiusInput))
-		self.createSphereButton.clicked.connect(lambda:self.updateVolume(self.vtkFrameAB, self.volumeLabelAB))
-		self.createSphereButton.clicked.connect(lambda:self.updateArea(self.vtkFrameAB, self.areaLabelAB))
 		self.sphereHbox.addWidget(self.sphRadiusInput)
 		self.sphereHbox.addWidget(self.createSphereButton)
 
@@ -130,8 +101,6 @@ class TabContainer(QWidget):
 		self.coneHeightInput = QLineEdit(placeholderText="height", maximumWidth=60)
 		self.createConeButton = QPushButton("Create Cone", self)
 		self.createConeButton.clicked.connect(lambda:self.createCone(self.vtkFrameAB, self.coneRadiusInput, self.coneHeightInput))
-		self.createConeButton.clicked.connect(lambda:self.updateVolume(self.vtkFrameAB, self.volumeLabelAB))
-		self.createConeButton.clicked.connect(lambda:self.updateArea(self.vtkFrameAB, self.areaLabelAB))
 		self.coneHbox.addWidget(self.coneRadiusInput)
 		self.coneHbox.addWidget(self.coneHeightInput)
 		self.coneHbox.addWidget(self.createConeButton)
@@ -149,84 +118,107 @@ class TabContainer(QWidget):
 		self.scalingHbox.addWidget(self.scaleInput)
 		self.scaleButton = QPushButton("Scale", self)
 		self.scaleButton.clicked.connect(lambda:self.scaleMesh(self.vtkFrameAB, self.scaleInput))
-		self.scaleButton.clicked.connect(lambda:self.updateVolume(self.vtkFrameAB, self.volumeLabelAB))
-		self.scaleButton.clicked.connect(lambda:self.updateArea(self.vtkFrameAB, self.areaLabelAB))
 		self.scalingHbox.addWidget(self.scaleButton)
 		self.scalingGboxLayout.addLayout(self.scalingHbox)
 
 		self.resetScaleButton = QPushButton("Reset Scale", self)
 		self.resetScaleButton.clicked.connect(lambda:self.resetMeshScale(self.vtkFrameAB))
-		self.resetScaleButton.clicked.connect(lambda:self.updateVolume(self.vtkFrameAB, self.volumeLabelAB))
-		self.resetScaleButton.clicked.connect(lambda:self.updateArea(self.vtkFrameAB, self.areaLabelAB))
 		self.scalingGboxLayout.addWidget(self.resetScaleButton)
 
 		self.scalingGbox.setLayout(self.scalingGboxLayout)
 
-		self.infoGbox = QGroupBox("Mesh Metrics")
-		self.infoGboxLayout = QVBoxLayout()
-		self.infoGboxLayout.addWidget(self.volumeLabelAB)
-		self.infoGboxLayout.addWidget(self.areaLabelAB)
-		self.infoGbox.setLayout(self.infoGboxLayout)
-
-		self.viewGbox = QGroupBox("View")
-		self.viewGboxLayout = QVBoxLayout()
-		self.resetCameraButton = QPushButton("Reset Camera", self)
-		self.resetCameraButton.clicked.connect(lambda:self.resetCamera(self.vtkFrameAB))
-		self.viewGboxLayout.addWidget(self.resetCameraButton)
-		self.viewGbox.setLayout(self.viewGboxLayout)
-
 		self.editVboxAB.addWidget(self.loadSaveGboxAB)
 		self.editVboxAB.addWidget(self.creationGbox)
 		self.editVboxAB.addWidget(self.scalingGbox)
-		self.editVboxAB.addWidget(self.infoGbox)
-		self.editVboxAB.addWidget(self.viewGbox)
 
 		self.editFrameAB.setLayout(self.editVboxAB)
 
-		self.partABTab.layout.addWidget(self.vtkFrameAB)					
-		self.partABTab.layout.addWidget(self.editFrameAB)					
+		self.partABTab.layout.addWidget(self.vtkFrameAB)
+		self.partABTab.layout.addWidget(self.editFrameAB)
 		self.partABTab.setLayout(self.partABTab.layout)	
 		#endregion FIRST TAB - MESH CREATION AND SCALING			
 
 		#region SECOND TAB - MESH COMPARISON
-		#endregion
+		self.partCTab.layout = QHBoxLayout(self)
+		self.comparisonFrameC = QFrame(self)
+		self.editFrameC = QFrame(self)
+		self.editFrameC.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
 
-		#region THIRD TAB - UNIT TESTS
+		self.comparisonOuterVbox = QVBoxLayout()
+		self.comparisonInnerHbox = QHBoxLayout()
+		self.vtkFrameCSource = VtkFrame(self, "Source")
+		self.vtkFrameCTarget = VtkFrame(self, "Target")
+		self.vtkFrameCComparison = VtkFrame(self, "Comparison")
+		self.comparisonInnerHbox.addWidget(self.vtkFrameCSource)
+		self.comparisonInnerHbox.addWidget(self.vtkFrameCTarget)
+		self.comparisonOuterVbox.addLayout(self.comparisonInnerHbox)
+		self.comparisonOuterVbox.addWidget(self.vtkFrameCComparison)
+
+		self.editVboxC = QVBoxLayout()
+		self.editVboxC.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+		self.comparisonGbox = QGroupBox("Mesh Comparison")
+		self.comparisonGboxLayout = QVBoxLayout()
+
+		self.sourceHbox = QHBoxLayout()
+		self.sourceLabel = QLabel("Source Mesh:",  minimumWidth=80)
+		self.sourceInput = QComboBox()
+		self.sourceInput.addItems(self.resourceList)
+		self.sourceLoadButton = QPushButton("Load")
+		self.sourceLoadButton.clicked.connect(lambda:self.loadMesh(self.vtkFrameCSource, self.sourceInput))
+		self.sourceHbox.addWidget(self.sourceLabel)
+		self.sourceHbox.addWidget(self.sourceInput)
+		self.sourceHbox.addWidget(self.sourceLoadButton)
+		self.comparisonGboxLayout.addLayout(self.sourceHbox)
+
+		self.targetHbox = QHBoxLayout()
+		self.targetLabel = QLabel("Target Mesh:", minimumWidth=80)
+		self.targetInput = QComboBox()
+		self.targetInput.addItems(self.resourceList)
+		self.targetLoadButton = QPushButton("Load")
+		self.targetLoadButton.clicked.connect(lambda:self.loadMesh(self.vtkFrameCTarget, self.targetInput))
+		self.targetHbox.addWidget(self.targetLabel)
+		self.targetHbox.addWidget(self.targetInput)
+		self.targetHbox.addWidget(self.targetLoadButton)
+		self.comparisonGboxLayout.addLayout(self.targetHbox)
+
+		self.compareButton = QPushButton("Compare Meshes")
+		self.compareButton.clicked.connect(lambda:self.compareMeshes(self.vtkFrameCSource, self.vtkFrameCTarget, self.vtkFrameCComparison, 0.01))
+		self.comparisonGboxLayout.addWidget(self.compareButton)
+
+		self.compareResultsHeading = QLabel("Calculated Hausdorff Distances:")
+		self.compareNoAlignResult = QLabel("\tBefore aligning: ")
+		self.compareBBResult = QLabel("\tAligned using oriented bounding box: ")
+		self.compareICPResult = QLabel("\tAligned using IterativeClosestPoint: ")
+		self.compareOverallResult = QLabel("Overall Result: ")
+
+		self.comparisonGboxLayout.addWidget(self.compareResultsHeading)
+		self.comparisonGboxLayout.addWidget(self.compareNoAlignResult)
+		self.comparisonGboxLayout.addWidget(self.compareBBResult)
+		self.comparisonGboxLayout.addWidget(self.compareICPResult)
+		self.comparisonGboxLayout.addWidget(self.compareOverallResult)
+
+		self.comparisonGbox.setLayout(self.comparisonGboxLayout)
+
+		self.editVboxC.addWidget(self.comparisonGbox)
+
+		self.editFrameC.setLayout(self.editVboxC)
+
+		self.partCTab.layout.addLayout(self.comparisonOuterVbox)
+		self.partCTab.layout.addWidget(self.editFrameC)
+		self.partCTab.setLayout(self.partCTab.layout)
 		#endregion
 
 		# Add tab widget to the TabContainer layout
 		self.layout.addWidget(self.tabs)
 		self.setLayout(self.layout)
-	
-	def loadSaveGbox(self, vtkFrame) -> QGroupBox:
-		groupbox = QGroupBox("Import/Export Mesh")
-		groupbox_layout = QVBoxLayout()
-
-		loadHbox = QHBoxLayout()
-		loadInput = QLineEdit(placeholderText="absolute path", maximumWidth=400)
-		loadButton = QPushButton("Load Mesh", self)
-		loadButton.clicked.connect(lambda:self.loadMesh(vtkFrame, loadInput))
-		loadHbox.addWidget(loadInput)
-		loadHbox.addWidget(loadButton)
-
-		saveHbox = QHBoxLayout()
-		saveInput = QLineEdit(placeholderText="absolute path", maximumWidth=400)
-		saveButton = QPushButton("Save Mesh", self)
-		saveButton.clicked.connect(lambda:self.saveMesh(vtkFrame, saveInput))
-		saveHbox.addWidget(saveInput)
-		saveHbox.addWidget(saveButton)
-
-		groupbox_layout.addLayout(loadHbox)
-		groupbox_layout.addLayout(saveHbox)
-
-		groupbox.setLayout(groupbox_layout)
-		return groupbox
 
 	def createSphere(self, vtkFrame, radiusInput):
 		if radiusInput.text() == "":
 			return
 		vtkFrame.meshModel.setSphereSource(float(radiusInput.text()))	# safe to cast as we already have double validator and empty check
 		vtkFrame.updateVtkSource()
+		vtkFrame.resetCamera()
 		radiusInput.clear()
 
 	def createCone(self, vtkFrame, radiusInput, heightInput):
@@ -234,15 +226,16 @@ class TabContainer(QWidget):
 			return
 		vtkFrame.meshModel.setConeSource(float(radiusInput.text()), float(heightInput.text()))	# safe to cast as we already have double validator and empty check
 		vtkFrame.updateVtkSource()
+		vtkFrame.resetCamera()
 		radiusInput.clear()
 		heightInput.clear()
 
 	def loadMesh(self, vtkFrame, loadInput):
-		if loadInput.text() == "":
+		if loadInput.currentText() == "":
 			return
-		vtkFrame.meshModel.loadMesh(loadInput.text())
+		vtkFrame.meshModel.loadMesh(os.path.join(os.getcwd(), 'resources', loadInput.currentText()))
 		vtkFrame.updateVtkSource()
-		loadInput.clear()
+		vtkFrame.resetCamera()
 	
 	def saveMesh(self, vtkFrame, saveInput):
 		if saveInput.text() == "":
@@ -257,6 +250,7 @@ class TabContainer(QWidget):
 			msg.exec_()
 		vtkFrame.updateVtkSource()
 		saveInput.clear()
+		self.updateResourceList()
 	
 	def scaleMesh(self, vtkFrame, scaleInput):
 		if scaleInput.text() == "":
@@ -269,25 +263,50 @@ class TabContainer(QWidget):
 		vtkFrame.meshModel.resetScale()
 		vtkFrame.updateVtkSource()
 
-	def updateVolume(self, vtkFrame, label):
-		label.setText("Volume: {}".format(vtkFrame.meshModel.mass.GetVolume()))
-
-	def updateArea(self, vtkFrame, label):
-		label.setText("Area: {}".format(vtkFrame.meshModel.mass.GetSurfaceArea()))
-
 	def resetCamera(self, vtkFrame):
 		vtkFrame.resetCamera()
 
+	def compareMeshes(self, vtkFrameSource, vtkFrameTarget, vtkFrameResult, threshold):
+		result, sourcePolyData, targetPolyData, originalDistance, bbDist, icpDist = MeshModel.compareMeshes(vtkFrameSource.meshModel, vtkFrameTarget.meshModel, threshold)
+		vtkFrameResult.clearActors()
+		vtkFrameResult.addActor(targetPolyData, 1.0, 'Red')
+		vtkFrameResult.addActor(sourcePolyData, 0.6, 'White')
+		vtkFrameResult.resetCamera()
+
+		# Update labels
+		self.compareNoAlignResult.setText("\tBefore aligning: {:0.5f}".format(originalDistance))
+		self.compareBBResult.setText("\tAligned using oriented bounding box: {:0.5f}".format(bbDist))
+		self.compareICPResult.setText("\tAligned using IterativeClosestPoint: {:0.5f}".format(icpDist))
+		if result:
+			self.compareOverallResult.setText("Overall Result: Same")
+			self.compareOverallResult.setStyleSheet("background-color: lightgreen")
+		else:
+			self.compareOverallResult.setText("Overall Result: Different")
+			self.compareOverallResult.setStyleSheet("background-color: lightpink")
+
+	def updateResourceList(self):
+		self.resourceList = os.listdir(os.path.join(os.getcwd(), 'resources'))
+		self.loadInputAB.clear()
+		self.loadInputAB.addItems(self.resourceList)
+		self.sourceInput.clear()
+		self.sourceInput.addItems(self.resourceList)
+		self.targetInput.clear()
+		self.targetInput.addItems(self.resourceList)
+
+
 class VtkFrame(QFrame):
-	def __init__(self, parent):
+	def __init__(self, parent, title=""):
 		super(QWidget, self).__init__(parent)
 
+		self.title = title
 		self.meshModel = MeshModel()
 
 		self.colors = vtkNamedColors()
 
 		# General layout setup
 		self.vboxlayout = QVBoxLayout()
+		self.frameLabel = QLabel(self.title)
+		self.vboxlayout.addWidget(self.frameLabel)
 		self.vtkWidget = QVTKRenderWindowInteractor(self)
 		self.vboxlayout.addWidget(self.vtkWidget)
 		self.setLayout(self.vboxlayout)
@@ -299,7 +318,6 @@ class VtkFrame(QFrame):
 
 		# Set up a mapper
 		self.mapper = vtk.vtkPolyDataMapper()
-		self.mapper.SetInputConnection(self.meshModel.vtkSource.GetOutputPort())
 
 		# Set up the source actor
 		self.actor = vtk.vtkActor()
@@ -312,22 +330,35 @@ class VtkFrame(QFrame):
 
 		# Connect actors to renderer
 		self.renderer.AddActor(self.actor)
-		self.renderer.SetBackground(self.colors.GetColor3d("sea_green_light"))
+		self.renderer.SetBackground(self.colors.GetColor3d("manganese_blue"))
 
 		self.show()
 		self.interactor.Initialize()
 		self.interactor.Start()
 
 	def updateVtkSource(self):
-		self.mapper.SetInputConnection(self.meshModel.vtkSource.GetOutputPort())
-		self.vtkWidget.GetRenderWindow().Render()	
+		if type(self.meshModel.vtkSource) != vtk.vtkEmptyRepresentation:
+			self.mapper.SetInputConnection(self.meshModel.vtkSource.GetOutputPort())
+			self.vtkWidget.GetRenderWindow().Render()	
 	
 	def resetCamera(self):
 		self.renderer.ResetCamera()
 		self.vtkWidget.GetRenderWindow().Render()	
+		
+	def clearActors(self):
+		self.renderer.RemoveAllViewProps()
+		
+	def addActor(self, polyData, opacity, color):
+		mapper = vtk.vtkDataSetMapper()
+		mapper.SetInputData(polyData)
+		actor = vtk.vtkActor()
+		actor.GetProperty().SetOpacity(opacity)
+		actor.GetProperty().SetDiffuseColor(self.colors.GetColor3d(color))
+		actor.SetMapper(mapper)
+		self.renderer.AddActor(actor)
+		self.vtkWidget.GetRenderWindow().Render()	
 
 if __name__ == '__main__':
-	print(VTK_VERSION_NUMBER)
 	app = QApplication(sys.argv)
 	ex = App()
 	sys.exit(app.exec_())
