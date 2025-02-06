@@ -21,11 +21,12 @@ class MeshModel:
     Attributes:
         vtkSource (vtkAlgorithm): The VTK data source.
     """
+
 	def __init__(self, vtkSource=None):
 		"""
         Initializes a MeshModel object.
 
-        Parameters:
+        Args:
             vtkSource (vtkAlgorithm): The VTK data source.
         """
 		if vtkSource == None:
@@ -50,7 +51,7 @@ class MeshModel:
 			sphereSource.SetPhiResolution(100)
 			sphereSource.SetThetaResolution(100)
 			self.vtkSource = sphereSource
-			self.vtkSource.Update()
+			self.vtkSource.Update()		
 			self.scaleReversion = 1
 
 	def setConeSource(self, radius, height):
@@ -75,7 +76,7 @@ class MeshModel:
 
 	def loadMesh(self, filepath) -> bool:
 		"""
-		Sets the model's source to a sphere of given radius.
+		Loads a mesh as source.
 
 		Args:
 			filepath (str): Filepath of the mesh to load. Use an absolute path.
@@ -115,9 +116,20 @@ class MeshModel:
 		self.vtkSource.Update()
 		return True
 
-	def saveMesh(self, filepath):
+	def saveMesh(self, filepath) -> bool:
+		"""
+		Saves the current mesh to a file.
+
+		Args:
+			filepath (str): Filepath to save the mesh to. Use an absolute path.
+
+		Returns:
+			bool: Whether the save completed sucessfully.
+		"""
 		if type(self.vtkSource) == vtk.vtkEmptyRepresentation:
-			return
+			frameinfo = getframeinfo(currentframe())
+			print("[ERROR][{}][{}]: Cannot write an empty mesh to file".format(frameinfo.filename, frameinfo.lineno))
+			return False
 		
 		_, extension = os.path.splitext(filepath)
 		extension = extension.lower()
@@ -137,17 +149,34 @@ class MeshModel:
 			stlWriter.SetInputConnection(self.vtkSource.GetOutputPort())
 			stlWriter.Write()
 		else:
-			logging.error("[{}{}]: Unsupported file extension [{}]".format(extension), exc_info=1)
+			frameinfo = getframeinfo(currentframe())
+			print("[ERROR][{}][{}]: Unsupported file type {}. Valid file types are .ply .vtp .stl".format(frameinfo.filename, frameinfo.lineno, extension))
 			return False
 		return True
 
 	def scaleMesh(self, scalar):
+		"""
+		Scales the mesh equally along all axes.
+
+		Args:
+			scalar (float): Scalar to apply across all axes.
+
+		Returns:
+			None
+		"""
+		# Do not try and scale an empty representation
 		if type(self.vtkSource) == vtk.vtkEmptyRepresentation:
 			return
 		
+		# Only values above zero are valid scalars
+		if scalar <= 0:
+			return
+		
+		# Create transform object
 		scaleTransform = vtkTransform()
 		scaleTransform.Scale(scalar, scalar, scalar)
 
+		# Connect transform to a filter, apply the filter and assign to the model's source
 		transformFilter = vtkTransformPolyDataFilter()
 		transformFilter.SetInputConnection(self.vtkSource.GetOutputPort())
 		transformFilter.SetTransform(scaleTransform)
@@ -155,210 +184,266 @@ class MeshModel:
 		self.vtkSource = transformFilter
 		self.vtkSource.Update()
 
+		# Keep track of scaling operations performed so that we can revert if desired.
 		self.scaleReversion = self.scaleReversion / scalar
 
 	def resetScale(self):
+		"""
+		Reverts all scaling operations performed on the mesh. Returns mesh to original state.
+
+		Args:
+			None
+
+		Returns:
+			None
+		"""
 		self.scaleMesh(self.scaleReversion)
 
 	def getVolume(self) -> float:
+		"""
+		Gets the volume of the mesh. If no source is currently specified it will return 0.
+
+		Args:
+			None
+
+		Returns:
+			float: Volume of the mesh.
+		"""
+		# Return a zero volume if the mesh is empty
 		if type(self.vtkSource) == vtk.vtkEmptyRepresentation:
 			return 0.0
+		
+		# Create mass properties object to extract volume of the mesh
 		mass = vtk.vtkMassProperties()
 		mass.SetInputData(self.vtkSource.GetOutput())
 		mass.Update()
 		return mass.GetVolume()
 
-	def compareMeshes(sourceMesh, targetMesh, threshold):
+	def compareMeshes(sourceMesh, targetMesh, threshold) -> tuple[bool, vtkPolyData, float, float, float]:
+		"""
+		Performs an Hausdorff distance comparison between aligned source and targets meshes. Oriented bounding box alignment and iterative closest point alignment are attempted,
+		only the minimum calculated distance is returned. For alignment, the source mesh is transformed with the goal of matching the target mesh, target mesh is not transformed.
+
+		Note: This algorithm comes from the VTK API example AlignTwoPolyDatas --> https://examples.vtk.org/site/Python/PolyData/AlignTwoPolyDatas/
+
+		Args:
+			sourceMesh (MeshModel): Source mesh to use in comparison.
+			targetMesh (MeshModel): Target mesh to use in comparison.
+			threshold (float): Hausdorff distance threshold to determine if the two meshes can be considered the same.
+
+		Returns:
+			result (bool): Whether the minimum Hausdorff distance between source and target mesh is below threshold
+			alignedSource (vtkPolyData): Source after alignment with target
+			noAlignmentHausDist (float): Hausdorff distance after no alignment 
+			obbAlignmentHausDist (float): Hausdorff distance after oriented bounding box alignment
+			icpHausDist (float): Hausdorff distance after iterative closest point refinement
+		"""
 		if type(sourceMesh.vtkSource) == vtk.vtkEmptyRepresentation or type(targetMesh.vtkSource) == vtk.vtkEmptyRepresentation:
 			frameinfo = getframeinfo(currentframe())
 			print("[ERROR][{}][{}]: Source and target meshes must have non empty representations".format(frameinfo.filename, frameinfo.lineno))
 			return False, None, None, None, None, None
-		source_polydata = sourceMesh.vtkSource.GetOutput()
-		# Save the source polydata in case the alignment process does not improve
-		# segmentation.
-		original_source_polydata = vtkPolyData()
-		original_source_polydata.DeepCopy(source_polydata)
 
-		target_polydata = targetMesh.vtkSource.GetOutput()
+		# We will be calculating the Hausdorff distance for 3 cases:
+		# 	1. No transformation applied to the meshes
+		# 	2. Alignment done via oriented bounding box
+		# 	3. Iterative closest point transform on the better of the first two cases to see if we can refine the alignment
 
-		distance = vtkHausdorffDistancePointSetFilter()
-		distance.SetInputData(0, target_polydata)
-		distance.SetInputData(1, source_polydata)
-		distance.Update()
+		# Case 1: No alignment transformations
+		sourcePolyData = sourceMesh.vtkSource.GetOutput()
+		targetPolyData = targetMesh.vtkSource.GetOutput()
 
-		distance_before_align = distance.GetOutput(0).GetFieldData().GetArray('HausdorffDistance').GetComponent(0, 0)
+		hausDistFilter = vtkHausdorffDistancePointSetFilter()
+		hausDistFilter.SetInputData(0, targetPolyData)
+		hausDistFilter.SetInputData(1, sourcePolyData)
+		hausDistFilter.Update()
 
-		# Get initial alignment using oriented bounding boxes.
-		MeshModel.align_bounding_boxes(source_polydata, target_polydata)
+		noAlignmentHausDist = hausDistFilter.GetOutput(0).GetFieldData().GetArray('HausdorffDistance').GetComponent(0, 0)
 
-		distance.SetInputData(0, target_polydata)
-		distance.SetInputData(1, source_polydata)
-		distance.Modified()
-		distance.Update()
-		distance_after_align = distance.GetOutput(0).GetFieldData().GetArray('HausdorffDistance').GetComponent(0, 0)
+		# Case 2: Oriented bounding box alignment
+		obbSourcePolyData = vtkPolyData()										# Create a copy of the source so that the original objects are never modified. Target is not modified so no need to copy.
+		obbSourcePolyData.DeepCopy(sourceMesh.vtkSource.GetOutput())	
+		
+		MeshModel.alignBoundingBoxes(obbSourcePolyData, targetPolyData)			# Perform oriented bounding box alignment
 
-		best_distance = min(distance_before_align, distance_after_align)
+		hausDistFilter.SetInputData(0, targetPolyData)							# Replace the input data of the filter with our now aligned source and targets meshes
+		hausDistFilter.SetInputData(1, obbSourcePolyData)
+		hausDistFilter.Modified()												
+		hausDistFilter.Update()
 
-		if distance_after_align > distance_before_align:
-			source_polydata.DeepCopy(original_source_polydata)
+		obbAlignmentHausDist = hausDistFilter.GetOutput(0).GetFieldData().GetArray('HausdorffDistance').GetComponent(0, 0)
 
-		# Refine the alignment using IterativeClosestPoint.
-		icp = vtkIterativeClosestPointTransform()
-		icp.SetSource(source_polydata)
-		icp.SetTarget(target_polydata)
-		icp.GetLandmarkTransform().SetModeToRigidBody()
-		icp.SetMaximumNumberOfLandmarks(100)
-		icp.SetMaximumMeanDistance(.00001)
-		icp.SetMaximumNumberOfIterations(500)
-		icp.CheckMeanDistanceOn()
-		icp.StartByMatchingCentroidsOn()
-		icp.Update()
-		icp_mean_distance = icp.GetMeanDistance()
-
-		lm_transform = icp.GetLandmarkTransform()
-		transform = vtkTransformPolyDataFilter()
-		transform.SetInputData(source_polydata)
-		transform.SetTransform(lm_transform)
-		transform.SetTransform(icp)
-		transform.Update()
-
-		distance.SetInputData(0, target_polydata)
-		distance.SetInputData(1, transform.GetOutput())
-		distance.Update()
-
-		# Note: If there is an error extracting eigenfunctions, then this will be zero.
-		distance_after_icp = distance.GetOutput(0).GetFieldData().GetArray('HausdorffDistance').GetComponent(0, 0)
-
-		# Check if ICP worked.
-		if not (math.isnan(icp_mean_distance) or math.isinf(icp_mean_distance)):
-			if distance_after_icp < best_distance:
-				best_distance = distance_after_icp
-
-		print('Distances:')
-		print('  Before aligning:                        {:0.5f}'.format(distance_before_align))
-		print('  Aligning using oriented bounding boxes: {:0.5f}'.format(distance_before_align))
-		print('  Aligning using IterativeClosestPoint:   {:0.5f}'.format(distance_after_icp))
-		print('  Best distance:                          {:0.5f}'.format(best_distance))
-
-		# Select the source to use.
-		if best_distance == distance_before_align:
-			source_polydata = original_source_polydata
-			print('Using original alignment')
-		elif best_distance == distance_after_align:
-			source_polydata = source_polydata
-			print('Using alignment by OBB')
+		# Case 3: ICP alignment to try and refine the result, use the better of the first two cases as a basis
+		icpSourcePolyData = vtkPolyData()
+		if obbAlignmentHausDist < noAlignmentHausDist:							# Copy the better of the first two cases to apply the ICP 
+			icpSourcePolyData.DeepCopy(obbSourcePolyData)
 		else:
-			source_polydata = transform.GetOutput()
-			print('Using alignment by ICP')
+			icpSourcePolyData.DeepCopy(sourcePolyData)
 
-		result = best_distance < threshold
+		icpTransform = vtkIterativeClosestPointTransform()
+		icpTransform.SetSource(icpSourcePolyData)
+		icpTransform.SetTarget(targetPolyData)
+		icpTransform.GetLandmarkTransform().SetModeToRigidBody()
+		icpTransform.SetMaximumNumberOfLandmarks(100)
+		icpTransform.SetMaximumMeanDistance(.00001)
+		icpTransform.SetMaximumNumberOfIterations(500)
+		icpTransform.CheckMeanDistanceOn()
+		icpTransform.StartByMatchingCentroidsOn()
+		icpTransform.Update()
 
-		return result, source_polydata, target_polydata, distance_before_align, distance_after_align, distance_after_icp
+		landmarkTransform = icpTransform.GetLandmarkTransform()					# Use a landmark transform as the specific implementation of ICP transform
+		landmarkFilter = vtkTransformPolyDataFilter()
+		landmarkFilter.SetInputData(icpSourcePolyData)
+		landmarkFilter.SetTransform(landmarkTransform)
+		landmarkFilter.SetTransform(icpTransform)
+		landmarkFilter.Update()
 
-	def align_bounding_boxes(source, target):
-		# Use OBBTree to create an oriented bounding box for target and source
-		source_obb_tree = vtkOBBTree()
-		source_obb_tree.SetDataSet(source)
-		source_obb_tree.SetMaxLevel(1)
-		source_obb_tree.BuildLocator()
+		hausDistFilter.SetInputData(0, targetPolyData)
+		hausDistFilter.SetInputData(1, landmarkFilter.GetOutput())
+		hausDistFilter.Update()
 
-		target_obb_tree = vtkOBBTree()
-		target_obb_tree.SetDataSet(target)
-		target_obb_tree.SetMaxLevel(1)
-		target_obb_tree.BuildLocator()
+		icpHausDist = hausDistFilter.GetOutput(0).GetFieldData().GetArray('HausdorffDistance').GetComponent(0, 0)
 
-		source_landmarks = vtkPolyData()
-		source_obb_tree.GenerateRepresentation(0, source_landmarks)
+		# Find the smallest calculated distance with its corresponding transformed source mesh
+		minHausDist = min([noAlignmentHausDist, obbAlignmentHausDist, icpHausDist])
+		if minHausDist == noAlignmentHausDist:
+			alignedSource = sourcePolyData
+		elif minHausDist == obbAlignmentHausDist:
+			alignedSource = obbSourcePolyData
+		else:
+			alignedSource = landmarkFilter.GetOutput()
 
-		target_landmarks = vtkPolyData()
-		target_obb_tree.GenerateRepresentation(0, target_landmarks)
+		result = minHausDist < threshold
 
-		lm_transform = vtkLandmarkTransform()
-		lm_transform.SetModeToSimilarity()
-		lm_transform.SetTargetLandmarks(target_landmarks.GetPoints())
-		best_distance = VTK_DOUBLE_MAX
-		best_points = vtkPoints()
-		best_distance = MeshModel.best_bounding_box(
-			"X",
-			target,
-			source,
-			target_landmarks,
-			source_landmarks,
-			best_distance,
-			best_points)
-		best_distance = MeshModel.best_bounding_box(
-			"Y",
-			target,
-			source,
-			target_landmarks,
-			source_landmarks,
-			best_distance,
-			best_points)
-		best_distance = MeshModel.best_bounding_box(
-			"Z",
-			target,
-			source,
-			target_landmarks,
-			source_landmarks,
-			best_distance,
-			best_points)
+		return result, alignedSource, noAlignmentHausDist, obbAlignmentHausDist, icpHausDist
 
-		lm_transform.SetSourceLandmarks(best_points)
-		lm_transform.Modified()
+	def alignBoundingBoxes(source, target):
+		"""
+		Finds the oriented bounding boxes of the source and target, and then attempts to align the source
+		to the target by applying a rotation about the x, y, or z axis.
 
-		lm_transform_pd = vtkTransformPolyDataFilter()
-		lm_transform_pd.SetInputData(source)
-		lm_transform_pd.SetTransform(lm_transform)
-		lm_transform_pd.Update()
+		Note: This algorithm comes from the VTK API example AlignTwoPolyDatas --> https://examples.vtk.org/site/Python/PolyData/AlignTwoPolyDatas/
 
-		source.DeepCopy(lm_transform_pd.GetOutput())
+		Args:
+			source (vtkPolyData): Source mesh to use in bounding box alignment.
+			target (vtkPolyData): Target mesh to use in bounding box alignment.
 
+		Returns:
+			None
+		"""
+		# Get oriented bounding box for source and target
+		sourceOBBTree = vtkOBBTree()
+		sourceOBBTree.SetDataSet(source)
+		sourceOBBTree.SetMaxLevel(1)
+		sourceOBBTree.BuildLocator()
+
+		targetOBBTree = vtkOBBTree()
+		targetOBBTree.SetDataSet(target)
+		targetOBBTree.SetMaxLevel(1)
+		targetOBBTree.BuildLocator()
+
+		# Create landmarks for source and target
+		sourceLandmarks = vtkPolyData()
+		sourceOBBTree.GenerateRepresentation(0, sourceLandmarks)
+
+		targetLandmarks = vtkPolyData()
+		targetOBBTree.GenerateRepresentation(0, targetLandmarks)
+		
+		# Initial landmark transform set up (set target, as this is not changing)
+		landmarkTransform = vtkLandmarkTransform()
+		landmarkTransform.SetModeToSimilarity()
+		landmarkTransform.SetTargetLandmarks(targetLandmarks.GetPoints())
+
+		# For each of the 3 axes, find the rotation transformation which minimizes the Hausdorff distance 
+		# between the rotated source bounding box and the target bounding box. Use the rotation that prodcues
+		# the overall smallest Hausdorff distance.
+		xDistance, xRotatedPoints = MeshModel.bestBoundingBoxOrientation("X", target, source, targetLandmarks, sourceLandmarks)
+		yDistance, yRotatedPoints = MeshModel.bestBoundingBoxOrientation("Y", target, source, targetLandmarks, sourceLandmarks)
+		zDistance, zRotatedPoints  = MeshModel.bestBoundingBoxOrientation("Z", target, source, targetLandmarks, sourceLandmarks)
+		
+		minDist = min([xDistance, yDistance, zDistance])
+		minDistPoints = vtkPoints()
+		if minDist == xDistance:
+			minDistPoints = xRotatedPoints
+		elif minDist == yDistance:
+			minDistPoints = yRotatedPoints
+		else:
+			minDistPoints=  zRotatedPoints
+
+		# Create a transform based on the best rotational transform and apply it to the source
+		landmarkTransform.SetSourceLandmarks(minDistPoints)
+		landmarkTransform.Modified()
+		landmarkFilter = vtkTransformPolyDataFilter()
+		landmarkFilter.SetInputData(source)
+		landmarkFilter.SetTransform(landmarkTransform)
+		landmarkFilter.Update()
+
+		source.DeepCopy(landmarkFilter.GetOutput())
 		return
 	
-	def best_bounding_box(axis, target, source, target_landmarks, source_landmarks, best_distance, best_points):
-		distance = vtkHausdorffDistancePointSetFilter()
-		test_transform = vtkTransform()
-		test_transform_pd = vtkTransformPolyDataFilter()
-		lm_transform = vtkLandmarkTransform()
-		lm_transform_pd = vtkTransformPolyDataFilter()
+	def bestBoundingBoxOrientation(axis, target, source, targetLandmarks, sourceLandmarks) -> tuple[float, vtkPoints]:
+		"""
+		Determines the best rotational transform about a single axis to minimize the Hausdorff distance
+		between the source and target bounding boxes, then applies that transform to the source's bounding
+		box.
 
-		lm_transform.SetModeToSimilarity()
-		lm_transform.SetTargetLandmarks(target_landmarks.GetPoints())
+		Note: This algorithm comes from the VTK API example AlignTwoPolyDatas --> https://examples.vtk.org/site/Python/PolyData/AlignTwoPolyDatas/
 
-		source_center = source_landmarks.GetCenter()
+		Args:
+			source (vtkPolyData): Source mesh to use in bounding box alignment.
+			target (vtkPolyData): Target mesh to use in bounding box alignment.
+			targetLandmarks (vtkPolyData): Target bounding box landmarks.
+			sourceLandmarks (vtkPolyData): Source bounding box landmarks.
 
-		delta = 90.0
-		for i in range(0, 4):
-			angle = delta * i
-			# Rotate about center
-			test_transform.Identity()
-			test_transform.Translate(source_center[0], source_center[1], source_center[2])
+		Returns:
+			distance(float): The Hausdorff distance between the transformed source bounding box and the target bounding box.
+			points(float): The transformed source's bounding box.
+		"""
+		distancePointsFilter = vtkHausdorffDistancePointSetFilter()
+		candidateTransform = vtkTransform()
+		candidateFilter = vtkTransformPolyDataFilter()
+		landmarkTransform = vtkLandmarkTransform()
+		landmarkFilter = vtkTransformPolyDataFilter()
+
+		# Initial landmark transform set up (set target, as this is not changing)
+		landmarkTransform.SetModeToSimilarity()
+		landmarkTransform.SetTargetLandmarks(targetLandmarks.GetPoints())
+
+		sourceCenter = sourceLandmarks.GetCenter()
+
+		distanceToBeat = VTK_DOUBLE_MAX
+		distanceToBeatPoints = vtkPoints()
+
+		# Iterate through angles of rotation, updating the minimum distance and it's corresponding transformed 
+		# bounding box points as it goes.
+		for angle in range(0, 270, 90):
+			candidateTransform.Identity()
+			candidateTransform.Translate(sourceCenter[0], sourceCenter[1], sourceCenter[2])		# Translate the center of the source to 0, 0, 0 to perform the rotation
 			if axis == "X":
-				test_transform.RotateX(angle)
+				candidateTransform.RotateX(angle)
 			elif axis == "Y":
-				test_transform.RotateY(angle)
+				candidateTransform.RotateY(angle)
 			else:
-				test_transform.RotateZ(angle)
-			test_transform.Translate(-source_center[0], -source_center[1], -source_center[2])
+				candidateTransform.RotateZ(angle)
+			candidateTransform.Translate(-sourceCenter[0], -sourceCenter[1], -sourceCenter[2])	# Revert translation now that the rotation is complete
 
-			test_transform_pd.SetTransform(test_transform)
-			test_transform_pd.SetInputData(source_landmarks)
-			test_transform_pd.Update()
+			candidateFilter.SetTransform(candidateTransform)
+			candidateFilter.SetInputData(sourceLandmarks)
+			candidateFilter.Update()
 
-			lm_transform.SetSourceLandmarks(test_transform_pd.GetOutput().GetPoints())
-			lm_transform.Modified()
+			landmarkTransform.SetSourceLandmarks(candidateFilter.GetOutput().GetPoints())
+			landmarkTransform.Modified()
 
-			lm_transform_pd.SetInputData(source)
-			lm_transform_pd.SetTransform(lm_transform)
-			lm_transform_pd.Update()
+			landmarkFilter.SetInputData(source)
+			landmarkFilter.SetTransform(landmarkTransform)
+			landmarkFilter.Update()
 
-			distance.SetInputData(0, target)
-			distance.SetInputData(1, lm_transform_pd.GetOutput())
-			distance.Update()
+			distancePointsFilter.SetInputData(0, target)
+			distancePointsFilter.SetInputData(1, landmarkFilter.GetOutput())
+			distancePointsFilter.Update()
 
-			test_distance = distance.GetOutput(0).GetFieldData().GetArray("HausdorffDistance").GetComponent(0, 0)
-			if test_distance < best_distance:
-				best_distance = test_distance
-				best_points.DeepCopy(test_transform_pd.GetOutput().GetPoints())
+			candidateDistance = distancePointsFilter.GetOutput(0).GetFieldData().GetArray("HausdorffDistance").GetComponent(0, 0)
+			if candidateDistance < distanceToBeat:
+				distanceToBeat = candidateDistance
+				distanceToBeatPoints = candidateFilter.GetOutput().GetPoints()
 
-		return best_distance
+		return distanceToBeat, distanceToBeatPoints

@@ -217,7 +217,7 @@ class TabContainer(QWidget):
 		if radiusInput.text() == "":
 			return
 		vtkFrame.meshModel.setSphereSource(float(radiusInput.text()))	# safe to cast as we already have double validator and empty check
-		vtkFrame.updateVtkSource()
+		vtkFrame.refreshMapper()
 		vtkFrame.resetCamera()
 		radiusInput.clear()
 
@@ -225,7 +225,7 @@ class TabContainer(QWidget):
 		if radiusInput.text() == "" or heightInput.text() == "" :
 			return
 		vtkFrame.meshModel.setConeSource(float(radiusInput.text()), float(heightInput.text()))	# safe to cast as we already have double validator and empty check
-		vtkFrame.updateVtkSource()
+		vtkFrame.refreshMapper()
 		vtkFrame.resetCamera()
 		radiusInput.clear()
 		heightInput.clear()
@@ -233,8 +233,16 @@ class TabContainer(QWidget):
 	def loadMesh(self, vtkFrame, loadInput):
 		if loadInput.currentText() == "":
 			return
-		vtkFrame.meshModel.loadMesh(os.path.join(os.getcwd(), 'resources', loadInput.currentText()))
-		vtkFrame.updateVtkSource()
+		success = vtkFrame.meshModel.loadMesh(os.path.join(os.getcwd(), 'resources', loadInput.currentText()))
+		if not success:
+			msg = QMessageBox()
+			msg.setIcon(QMessageBox.Critical)
+			msg.setText("Error")
+			msg.setInformativeText("Unable to load mesh {}".format(loadInput.currentText()))
+			msg.setWindowTitle("Error")
+			msg.exec_()
+			return
+		vtkFrame.refreshMapper()
 		vtkFrame.resetCamera()
 	
 	def saveMesh(self, vtkFrame, saveInput):
@@ -248,7 +256,8 @@ class TabContainer(QWidget):
 			msg.setInformativeText("Unable to save mesh to {}".format(saveInput.text()))
 			msg.setWindowTitle("Error")
 			msg.exec_()
-		vtkFrame.updateVtkSource()
+			return
+		vtkFrame.refreshMapper()
 		saveInput.clear()
 		self.updateResourceList()
 	
@@ -256,26 +265,26 @@ class TabContainer(QWidget):
 		if scaleInput.text() == "":
 			return
 		vtkFrame.meshModel.scaleMesh(float(scaleInput.text()))	# safe to cast as we already have double validator and empty check
-		vtkFrame.updateVtkSource()
+		vtkFrame.refreshMapper()
 		scaleInput.clear()
 
 	def resetMeshScale(self, vtkFrame):
 		vtkFrame.meshModel.resetScale()
-		vtkFrame.updateVtkSource()
+		vtkFrame.refreshMapper()
 
 	def resetCamera(self, vtkFrame):
 		vtkFrame.resetCamera()
 
 	def compareMeshes(self, vtkFrameSource, vtkFrameTarget, vtkFrameResult, threshold):
-		result, sourcePolyData, targetPolyData, originalDistance, bbDist, icpDist = MeshModel.compareMeshes(vtkFrameSource.meshModel, vtkFrameTarget.meshModel, threshold)
+		result, transformedSource, originalDistance, obbDist, icpDist = MeshModel.compareMeshes(vtkFrameSource.meshModel, vtkFrameTarget.meshModel, threshold)
 		vtkFrameResult.clearActors()
-		vtkFrameResult.addActor(targetPolyData, 1.0, 'Red')
-		vtkFrameResult.addActor(sourcePolyData, 0.6, 'White')
+		vtkFrameResult.addActor(vtkFrameTarget.meshModel.vtkSource.GetOutput(), 1.0, 'Red')
+		vtkFrameResult.addActor(transformedSource, 0.6, 'White')
 		vtkFrameResult.resetCamera()
 
-		# Update labels
+		# Update distance labels
 		self.compareNoAlignResult.setText("\tBefore aligning: {:0.5f}".format(originalDistance))
-		self.compareBBResult.setText("\tAligned using oriented bounding box: {:0.5f}".format(bbDist))
+		self.compareBBResult.setText("\tAligned using oriented bounding box: {:0.5f}".format(obbDist))
 		self.compareICPResult.setText("\tAligned using IterativeClosestPoint: {:0.5f}".format(icpDist))
 		if result:
 			self.compareOverallResult.setText("Overall Result: Same")
@@ -295,7 +304,22 @@ class TabContainer(QWidget):
 
 
 class VtkFrame(QFrame):
+	"""
+    A class representing a VTK mesh viewing frame.
+
+    Attributes:
+        title (str): Title of the frame, placed on the top left.
+        meshModel (MeshModel): Model of object that is to be presented in viewer.
+    """
+
 	def __init__(self, parent, title=""):
+		"""
+        Initializes a VtkFrame object.
+
+        Args:
+            parent (QObject): Parent of the frame.
+            title (str): Title of the frame, placed on the top left.
+        """
 		super(QWidget, self).__init__(parent)
 
 		self.title = title
@@ -336,19 +360,57 @@ class VtkFrame(QFrame):
 		self.interactor.Initialize()
 		self.interactor.Start()
 
-	def updateVtkSource(self):
+	def refreshMapper(self):
+		"""
+		Refresh mapper and render after vtk source update.
+
+		Args:
+			None
+
+		Returns:
+			None
+		"""
 		if type(self.meshModel.vtkSource) != vtk.vtkEmptyRepresentation:
 			self.mapper.SetInputConnection(self.meshModel.vtkSource.GetOutputPort())
 			self.vtkWidget.GetRenderWindow().Render()	
 	
 	def resetCamera(self):
+		"""
+		Reset the render's camera.
+
+		Args:
+			None
+
+		Returns:
+			None
+		"""
 		self.renderer.ResetCamera()
 		self.vtkWidget.GetRenderWindow().Render()	
 		
 	def clearActors(self):
+		"""
+		Remove all actors from the render.
+
+		Args:
+			None
+
+		Returns:
+			None
+		"""
 		self.renderer.RemoveAllViewProps()
 		
 	def addActor(self, polyData, opacity, color):
+		"""
+		Add actor to the renderer.
+
+		Args:
+			polyData (vtkPolyData): PolyData for the actor to use.
+			opacity (float): Opacity of the actor.
+			color (str): Color of the actor.
+
+		Returns:
+			None
+		"""
 		mapper = vtk.vtkDataSetMapper()
 		mapper.SetInputData(polyData)
 		actor = vtk.vtkActor()
