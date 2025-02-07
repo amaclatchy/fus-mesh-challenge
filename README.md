@@ -26,10 +26,16 @@ python app.py
 pytest
 ```
 
+## Linux vs. Windows
+I created this program using Ubuntu 22.04, however I have tested on a Windows machine and the program works as intended. If you want to run this on Windows, just beware that to activate your virtual environment you will have to run the following command instead of sourcing /path/to/new/virtual/environment/bin/activate.
+```
+cd /path/to/new/virtual/environment/Scripts && activate
+```
+
 ## Assignment Function Map
-Not all code included here is answering the assignment questions. If you want to jump straight to the assignment answers, see map below:\
+Not all code included here is answering the assignment questions. If you want to jump straight to the assignment answers, see map below:
 
 Part A --> See mesh_model.py, functions setSphereSource (line 38) and setConeSource (line 57).\
 Part B --> See mesh_model.py, function scaleMesh (line 157).\
 Part C --> See mesh_model.py, function compareMeshes(line 218).\
-Part D --> See test.py for all unit tests.\
+Part D --> See test_MeshModel.py for all unit tests.
