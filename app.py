@@ -34,6 +34,9 @@ class App(QMainWindow):
 		self.setCentralWidget(self.tabContainer)
 
 		self.show()
+
+	def closeEvent(self, event):
+		self.tabContainer.closeCleanly()
     
 class TabContainer(QWidget):
 	def __init__(self, parent):
@@ -302,6 +305,12 @@ class TabContainer(QWidget):
 		self.targetInput.clear()
 		self.targetInput.addItems(self.resourceList)
 
+	def closeCleanly(self):
+		self.vtkFrameAB.closeCleanly()
+		self.vtkFrameCSource.closeCleanly()
+		self.vtkFrameCTarget.closeCleanly()
+		self.vtkFrameCComparison.closeCleanly()
+
 
 class VtkFrame(QFrame):
 	"""
@@ -419,6 +428,10 @@ class VtkFrame(QFrame):
 		actor.SetMapper(mapper)
 		self.renderer.AddActor(actor)
 		self.vtkWidget.GetRenderWindow().Render()	
+
+	def closeCleanly(self):
+		self.vtkWidget.GetRenderWindow().Finalize()
+		self.interactor.TerminateApp()
 
 if __name__ == '__main__':
 	app = QApplication(sys.argv)
