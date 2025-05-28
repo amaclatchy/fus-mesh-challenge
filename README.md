@@ -1,5 +1,5 @@
 # fus-mesh-challenge
-SRI FUS interview technical challenge submission.
+Technical challenge submission.
 
 ## Repo Tour
 There are 3 main files in this repo:
